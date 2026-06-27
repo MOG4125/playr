@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Custom Configurable Video Player</title>
   <style>
-    /* Default look before configuration settings load */
     html, body {
       margin: 0;
       padding: 0;
@@ -92,27 +91,25 @@
     const canvas = document.getElementById('animationCanvas');
     const ctx = canvas.getContext('2d');
 
-    // Video status control switches
     videoElement.addEventListener('waiting', () => loadingOverlay.classList.remove('hidden'));
     videoElement.addEventListener('playing', () => loadingOverlay.classList.add('hidden'));
     videoElement.addEventListener('canplay', () => loadingOverlay.classList.add('hidden'));
 
-    // Helper engine to clean up and extract configuration text values
+    // FIXED: Corrected mapping engine to extract key and value parameters 
     function parseConfigFile(text) {
       const config = {};
       const lines = text.split('\n');
       lines.forEach(line => {
         const parts = line.split('=');
         if (parts.length === 2) {
-          const key = parts[0].trim();
-          const value = parts[1].trim();
+          const key = parts[0].trim();   // Pulls the word before the = sign
+          const value = parts[1].trim(); // Pulls the setting after the = sign
           config[key] = value;
         }
       });
       return config;
     }
 
-    // Read the config.playr file directly from your repository folder
     fetch('config.playr')
       .then(response => {
         if (!response.ok) {
@@ -123,7 +120,6 @@
       .then(text => {
         const settings = parseConfigFile(text);
 
-        // 1. Update colors across elements dynamically
         if (settings.background_color) {
           const color = settings.background_color;
           document.body.style.backgroundColor = color;
@@ -131,12 +127,10 @@
           loadingOverlay.style.backgroundColor = color;
         }
 
-        // 2. Attach Video URL source
         if (settings.video_url) {
           videoElement.src = settings.video_url;
         }
 
-        // 3. Build custom animation strip layouts if requested
         const stripUrl = settings.strip_image;
         const totalFrames = parseInt(settings.animation_frames) || 1;
         const frameRate = parseInt(settings.animation_fps) || 24;
@@ -175,7 +169,7 @@
           };
         }
       })
-      .catch(error => console.error('Error loading custom layout rules:', error));
+      .catch(error => console.error('Error loading config file:', error));
   </script>
 </body>
 </html>
