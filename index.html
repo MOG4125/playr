@@ -34,6 +34,13 @@
       z-index: 1;
     }
 
+    .dropbox-embed {
+      width: 100%;
+      height: 100%;
+      border: none;
+      z-index: 1;
+    }
+
     .loading-overlay {
       position: absolute;
       top: 0;
@@ -94,58 +101,78 @@
       display: none;
     }
 
-    .debug-info {
-      color: #888;
-      font-size: 11px;
-      margin-top: 10px;
+    .fallback-notice {
+      color: #ffaa00;
+      font-size: 12px;
+      margin-top: 15px;
       text-align: center;
       display: none;
-      max-width: 90%;
-      word-break: break-all;
+      max-width: 80%;
     }
   </style>
 </head>
 <body>
 
-  <div class="player-container">
-    <video id="customVideo" controls playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
+  <div class="player-container" id="playerContainer">
+    <video id="customVideo" controls playsinline webkit-playsinline preload="auto" crossorigin="anonymous" style="display: none;"></video>
+    <iframe id="dropboxFrame" class="dropbox-embed" style="display: none;" allow="autoplay"></iframe>
 
     <div id="loadingOverlay" class="loading-overlay">
       <div id="spinnerBackup" class="default-spinner"></div>
       <canvas id="animationCanvas" style="display: none;"></canvas>
       <div id="errorMessage" class="error-message"></div>
       <div id="tapToPlay" class="tap-to-play">Tap to play</div>
-      <div id="debugInfo" class="debug-info"></div>
+      <div id="fallbackNotice" class="fallback-notice"></div>
     </div>
   </div>
 
   <script>
     const videoElement = document.getElementById('customVideo');
+    const dropboxFrame = document.getElementById('dropboxFrame');
     const loadingOverlay = document.getElementById('loadingOverlay');
     const spinnerBackup = document.getElementById('spinnerBackup');
     const canvas = document.getElementById('animationCanvas');
     const ctx = canvas.getContext('2d');
     const errorMessage = document.getElementById('errorMessage');
     const tapToPlay = document.getElementById('tapToPlay');
-    const debugInfo = document.getElementById('debugInfo');
+    const fallbackNotice = document.getElementById('fallbackNotice');
 
     let animationInterval = null;
     let configLoaded = false;
     let videoLoadFailed = false;
     let currentVideoUrl = '';
+    let isDropbox = false;
+    let useIframeFallback = false;
+    let overlayStartTime = 0;
+    let overlayMinDuration = 3000; // Default: 3 seconds, overridden by config
+    let overlayHidePending = false;
 
-    function showError(msg, debug) {
+    function showError(msg) {
       errorMessage.textContent = msg;
       errorMessage.style.display = 'block';
       spinnerBackup.style.display = 'none';
       canvas.style.display = 'none';
-      if (debug) {
-        debugInfo.textContent = debug;
-        debugInfo.style.display = 'block';
-      }
     }
 
     function hideOverlay() {
+      const elapsed = Date.now() - overlayStartTime;
+      const remaining = overlayMinDuration - elapsed;
+
+      if (remaining > 0 && !overlayHidePending) {
+        overlayHidePending = true;
+        setTimeout(() => {
+          overlayHidePending = false;
+          doHideOverlay();
+        }, remaining);
+        return;
+      }
+
+      if (!overlayHidePending) {
+        doHideOverlay();
+      }
+    }
+
+    function doHideOverlay() {
       loadingOverlay.classList.add('hidden');
       if (animationInterval) {
         clearInterval(animationInterval);
@@ -155,9 +182,10 @@
 
     function showOverlay() {
       loadingOverlay.classList.remove('hidden');
+      overlayStartTime = Date.now();
+      overlayHidePending = false;
     }
 
-    // Video event listeners
     videoElement.addEventListener('playing', () => {
       hideOverlay();
       videoLoadFailed = false;
@@ -175,17 +203,23 @@
       videoLoadFailed = true;
       const error = videoElement.error;
       let msg = 'Video failed to load';
-      let debug = 'URL: ' + currentVideoUrl;
       if (error) {
         switch(error.code) {
           case 1: msg = 'Video loading aborted'; break;
-          case 2: msg = 'Network error - video URL is unreachable or blocked by CORS'; debug += ' | Code: MEDIA_ERR_NETWORK'; break;
-          case 3: msg = 'Video decode error - file may be corrupted or wrong format'; debug += ' | Code: MEDIA_ERR_DECODE'; break;
-          case 4: msg = 'Video format not supported by this browser'; debug += ' | Code: MEDIA_ERR_SRC_NOT_SUPPORTED'; break;
+          case 2: msg = 'Network error - video URL is unreachable or blocked by CORS'; break;
+          case 3: msg = 'Video decode error - file may be corrupted or wrong format'; break;
+          case 4: 
+            msg = 'Video format not supported - Dropbox blocks direct video streaming'; 
+            if (isDropbox && !useIframeFallback) {
+              useIframeFallback = true;
+              setupDropboxIframe();
+              return;
+            }
+            break;
         }
       }
       console.error('Video error:', msg, error);
-      showError(msg + ' — Tap overlay to retry', debug);
+      showError(msg + ' — Tap overlay to retry');
       tapToPlay.style.display = 'block';
       showOverlay();
     });
@@ -200,8 +234,29 @@
       showOverlay();
     });
 
-    // Manual click container to handle autoplay blocks
+    function setupDropboxIframe() {
+      videoElement.style.display = 'none';
+      dropboxFrame.style.display = 'block';
+
+      let embedUrl = currentVideoUrl.replace('raw=1', '');
+      embedUrl = embedUrl.replace(/[?&]$/, '');
+
+      dropboxFrame.src = embedUrl;
+
+      fallbackNotice.textContent = 'Using Dropbox embed (limited controls)';
+      fallbackNotice.style.display = 'block';
+
+      setTimeout(() => {
+        hideOverlay();
+      }, 2000);
+    }
+
     loadingOverlay.addEventListener('click', () => {
+      if (useIframeFallback && isDropbox) {
+        hideOverlay();
+        return;
+      }
+
       if (!videoElement.src) {
         showError('No video source configured');
         return;
@@ -245,18 +300,17 @@
     function convertDropboxUrl(url) {
       if (!url) return url;
 
-      // Dropbox changed: dl=1 no longer works for video streaming
-      // Use raw=1 instead for embeddable content, or convert to direct download format
       if (url.includes('dropbox.com')) {
-        // Remove any existing dl parameter
+        isDropbox = true;
         url = url.replace(/[?&]dl=[01]/, '');
-        // Remove trailing ? or &
+        url = url.replace(/[?&]raw=[01]/, '');
         url = url.replace(/[?&]$/, '');
-        // Add raw=1 for embeddable streaming
         url += (url.includes('?') ? '&' : '?') + 'raw=1';
       }
       return url;
     }
+
+    overlayStartTime = Date.now();
 
     fetch('config.playr?cb=' + Date.now())
       .then(response => {
@@ -270,6 +324,15 @@
         const settings = parseConfigFile(text);
         console.log('Config loaded:', settings);
 
+        // Read overlay minimum duration from config (milliseconds)
+        if (settings.overlay_min_duration) {
+          const parsed = parseInt(settings.overlay_min_duration);
+          if (!isNaN(parsed) && parsed >= 0) {
+            overlayMinDuration = parsed;
+            console.log('Overlay min duration set to:', overlayMinDuration, 'ms');
+          }
+        }
+
         if (settings.background_color) {
           const color = settings.background_color;
           document.body.style.backgroundColor = color;
@@ -279,23 +342,25 @@
 
         if (settings.video_url) {
           currentVideoUrl = convertDropboxUrl(settings.video_url);
-          console.log('Loading video from:', currentVideoUrl);
+          console.log('Loading video from:', currentVideoUrl, 'isDropbox:', isDropbox);
 
-          // Reset video element completely
+          if (isDropbox) {
+            videoElement.style.display = 'block';
+            dropboxFrame.style.display = 'none';
+          }
+
           videoElement.pause();
           videoElement.removeAttribute('src');
           videoElement.load();
 
-          // Set new source
           videoElement.src = currentVideoUrl;
           videoElement.load();
 
-          // Try autoplay muted
           videoElement.muted = true;
           const playPromise = videoElement.play();
           if (playPromise !== undefined) {
             playPromise.catch(err => {
-              console.log("Autoplay blocked. Waiting for manual user interaction.", err);
+              console.log("Autoplay blocked:", err);
               tapToPlay.style.display = 'block';
             });
           }
@@ -303,7 +368,6 @@
           showError('No video_url found in config.playr');
         }
 
-        // Load sprite animation
         const stripUrl = settings.strip_image;
         const totalFrames = parseInt(settings.animation_frames) || 1;
         const frameRate = parseInt(settings.animation_fps) || 24;
