@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>It's Playr Bitch</title>
+  <title>Custom Configurable Video Player</title>
   <style>
     html, body {
       margin: 0;
@@ -110,11 +110,14 @@
       max-width: 80%;
     }
   </style>
+<base target="_blank">
 </head>
 <body>
 
   <div class="player-container" id="playerContainer">
-    <video id="customVideo" controls playsinline webkit-playsinline preload="auto" crossorigin="anonymous" style="display: none;"></video>
+    <video id="customVideo" controls playsinline webkit-playsinline preload="auto" style="display: none;">
+      <source id="videoSource" src="" type="video/mp4">
+    </video>
     <iframe id="dropboxFrame" class="dropbox-embed" style="display: none;" allow="autoplay"></iframe>
 
     <div id="loadingOverlay" class="loading-overlay">
@@ -128,6 +131,7 @@
 
   <script>
     const videoElement = document.getElementById('customVideo');
+    const videoSource = document.getElementById('videoSource');
     const dropboxFrame = document.getElementById('dropboxFrame');
     const loadingOverlay = document.getElementById('loadingOverlay');
     const spinnerBackup = document.getElementById('spinnerBackup');
@@ -144,8 +148,10 @@
     let isDropbox = false;
     let useIframeFallback = false;
     let overlayStartTime = 0;
-    let overlayMinDuration = 3000; // Default: 3 seconds, overridden by config
+    let overlayMinDuration = 3000;
     let overlayHidePending = false;
+    let retryCount = 0;
+    const maxRetries = 2;
 
     function showError(msg) {
       errorMessage.textContent = msg;
@@ -186,9 +192,35 @@
       overlayHidePending = false;
     }
 
+    function loadVideo(url) {
+      console.log('Loading video:', url);
+
+      // Reset video element
+      videoElement.pause();
+      videoElement.removeAttribute('src');
+      videoSource.src = '';
+      videoElement.load();
+
+      // Set new source using <source> element (more reliable across browsers)
+      videoSource.src = url;
+      videoElement.load();
+
+      videoElement.muted = true;
+      videoElement.style.display = 'block';
+
+      const playPromise = videoElement.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.log("Autoplay blocked:", err);
+          tapToPlay.style.display = 'block';
+        });
+      }
+    }
+
     videoElement.addEventListener('playing', () => {
       hideOverlay();
       videoLoadFailed = false;
+      retryCount = 0;
     });
 
     videoElement.addEventListener('canplay', () => {
@@ -203,13 +235,14 @@
       videoLoadFailed = true;
       const error = videoElement.error;
       let msg = 'Video failed to load';
+
       if (error) {
         switch(error.code) {
           case 1: msg = 'Video loading aborted'; break;
-          case 2: msg = 'Network error - video URL is unreachable or blocked by CORS'; break;
-          case 3: msg = 'Video decode error - file may be corrupted or wrong format'; break;
+          case 2: msg = 'Network error - video URL is unreachable'; break;
+          case 3: msg = 'Video decode error - file may be corrupted'; break;
           case 4: 
-            msg = 'Video format not supported - Dropbox blocks direct video streaming'; 
+            msg = 'Video format not supported or blocked by host'; 
             if (isDropbox && !useIframeFallback) {
               useIframeFallback = true;
               setupDropboxIframe();
@@ -218,7 +251,20 @@
             break;
         }
       }
-      console.error('Video error:', msg, error);
+
+      console.error('Video error:', msg, 'Code:', error ? error.code : 'unknown');
+
+      // Retry logic for transient failures
+      if (retryCount < maxRetries && error && error.code === 2) {
+        retryCount++;
+        console.log('Retrying... attempt', retryCount);
+        setTimeout(() => {
+          videoElement.load();
+          videoElement.play().catch(() => {});
+        }, 1000);
+        return;
+      }
+
       showError(msg + ' — Tap overlay to retry');
       tapToPlay.style.display = 'block';
       showOverlay();
@@ -257,12 +303,13 @@
         return;
       }
 
-      if (!videoElement.src) {
+      if (!videoSource.src) {
         showError('No video source configured');
         return;
       }
 
       if (videoLoadFailed) {
+        retryCount = 0;
         videoElement.load();
         videoLoadFailed = false;
       }
@@ -324,12 +371,11 @@
         const settings = parseConfigFile(text);
         console.log('Config loaded:', settings);
 
-        // Read overlay minimum duration from config (milliseconds)
         if (settings.overlay_min_duration) {
           const parsed = parseInt(settings.overlay_min_duration);
           if (!isNaN(parsed) && parsed >= 0) {
             overlayMinDuration = parsed;
-            console.log('Overlay min duration set to:', overlayMinDuration, 'ms');
+            console.log('Overlay min duration:', overlayMinDuration, 'ms');
           }
         }
 
@@ -342,28 +388,8 @@
 
         if (settings.video_url) {
           currentVideoUrl = convertDropboxUrl(settings.video_url);
-          console.log('Loading video from:', currentVideoUrl, 'isDropbox:', isDropbox);
-
-          if (isDropbox) {
-            videoElement.style.display = 'block';
-            dropboxFrame.style.display = 'none';
-          }
-
-          videoElement.pause();
-          videoElement.removeAttribute('src');
-          videoElement.load();
-
-          videoElement.src = currentVideoUrl;
-          videoElement.load();
-
-          videoElement.muted = true;
-          const playPromise = videoElement.play();
-          if (playPromise !== undefined) {
-            playPromise.catch(err => {
-              console.log("Autoplay blocked:", err);
-              tapToPlay.style.display = 'block';
-            });
-          }
+          console.log('Video URL:', currentVideoUrl, 'isDropbox:', isDropbox);
+          loadVideo(currentVideoUrl);
         } else {
           showError('No video_url found in config.playr');
         }
