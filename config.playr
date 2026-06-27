@@ -2,4 +2,4 @@ strip_image = loa.png
 animation_frames = 91
 animation_fps = 30
 animation_size = 250
-background_color = #444444
+background_color = #00000
