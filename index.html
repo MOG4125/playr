@@ -49,9 +49,12 @@
       transition: opacity 0.4s ease;
     }
 
-    /* Custom Animation Canvas Canvas box */
+    /* Custom Animation Canvas box */
     #animationCanvas {
       display: block;
+      /* Prevents browsers from making resized pixel-art animations look blurry */
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
 
     /* Standard loading spinner backup if no sprite strip is given */
@@ -95,6 +98,7 @@
     const stripUrl = urlParams.get('strip');       // &strip=
     const totalFrames = parseInt(urlParams.get('frames')) || 1; // &frames=
     const frameRate = parseInt(urlParams.get('fps')) || 24;     // &fps=
+    const customSize = parseInt(urlParams.get('size'));        // &size=
 
     const videoElement = document.getElementById('customVideo');
     const loadingOverlay = document.getElementById('loadingOverlay');
@@ -134,20 +138,27 @@
         const frameWidth = img.width / totalFrames;
         const frameHeight = img.height;
 
-        canvas.width = frameWidth;
-        canvas.height = frameHeight;
+        // Apply custom size scaling if given in the link
+        if (customSize) {
+          const aspectRatio = frameWidth / frameHeight;
+          canvas.width = customSize;
+          canvas.height = customSize / aspectRatio;
+        } else {
+          canvas.width = frameWidth;
+          canvas.height = frameHeight;
+        }
 
         let currentFrame = 0;
 
         // Loop engine drawing frame sections sequentially
         setInterval(() => {
-          ctx.clearRect(0, 0, frameWidth, frameHeight);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
           
           // Draw targeted frame segment from horizontal sprite map
           ctx.drawImage(
             img, 
-            currentFrame * frameWidth, 0, frameWidth, frameHeight, // Source clipping
-            0, 0, frameWidth, frameHeight // Target canvas output
+            currentFrame * frameWidth, 0, frameWidth, frameHeight, // Source clipping sizes
+            0, 0, canvas.width, canvas.height // Target output sizes
           );
 
           currentFrame = (currentFrame + 1) % totalFrames;
