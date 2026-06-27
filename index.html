@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>It's playr bitch</title>
+  <title>Custom Configurable Video Player</title>
   <style>
     html, body {
       margin: 0;
@@ -95,14 +95,12 @@
     videoElement.addEventListener('playing', () => loadingOverlay.classList.add('hidden'));
     videoElement.addEventListener('canplay', () => loadingOverlay.classList.add('hidden'));
 
-    // Tested parsing engine that safely separates configuration terms
     function parseConfigFile(text) {
       const config = {};
       const lines = text.split('\n');
       
       lines.forEach(line => {
         if (line.includes('=')) {
-          // Splits safely at only the very first equals sign
           const index = line.indexOf('=');
           const key = line.substring(0, index).trim();
           const value = line.substring(index + 1).trim();
@@ -114,7 +112,8 @@
       return config;
     }
 
-    fetch('config.playr')
+    // FIXED: Appends a timestamp trick so GitHub cannot cache this request
+    fetch('config.playr?cb=' + Date.now())
       .then(response => {
         if (!response.ok) {
           throw new Error('Could not find config.playr file');
@@ -141,8 +140,9 @@
         const customSize = parseInt(settings.animation_size);
 
         if (stripUrl && totalFrames > 1) {
+          // FIXED: Forces cache clearing for the loader image file too
           const img = new Image();
-          img.src = stripUrl;
+          img.src = stripUrl + '?cb=' + Date.now();
 
           img.onload = function() {
             spinnerBackup.style.display = 'none';
