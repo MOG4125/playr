@@ -1,5 +1,4 @@
-video_url = https://w3schools.com
-strip_image = ls.png
+strip_image = loa.png
 animation_frames = 91
 animation_fps = 24
 animation_size = 250
