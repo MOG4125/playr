@@ -95,16 +95,27 @@
     const canvas = document.getElementById('animationCanvas');
     const ctx = canvas.getContext('2d');
 
+    let animationInterval = null;
+
+    function hideOverlay() {
+      loadingOverlay.classList.add('hidden');
+      if (animationInterval) {
+        clearInterval(animationInterval);
+        animationInterval = null;
+      }
+    }
+
     // Force hide overlay when video state updates
-    videoElement.addEventListener('playing', () => loadingOverlay.classList.add('hidden'));
-    videoElement.addEventListener('canplay', () => loadingOverlay.classList.add('hidden'));
-    videoElement.addEventListener('loadeddata', () => loadingOverlay.classList.add('hidden'));
+    videoElement.addEventListener('playing', hideOverlay);
+    videoElement.addEventListener('canplay', hideOverlay);
+    videoElement.addEventListener('loadeddata', hideOverlay);
 
     // Manual click container to handle iPad autoplay block overrides
     loadingOverlay.addEventListener('click', () => {
-      videoElement.muted = true; // Guarantees muting rules are satisfied before playing
+      if (!videoElement.src) return; // Don't try to play if no source loaded
+      videoElement.muted = true;
       videoElement.play().catch(err => console.log("Bypass fail:", err));
-      loadingOverlay.classList.add('hidden');
+      hideOverlay();
     });
 
     function parseConfigFile(text) {
@@ -137,14 +148,12 @@
         }
 
         if (settings.video_url) {
-          // OPTIMIZED: Clears active video instances before feeding the new address
           videoElement.removeAttribute('src');
           videoElement.load();
           
           videoElement.src = settings.video_url;
           videoElement.load();
           
-          // Triggers muted autoplay cycle safely
           videoElement.muted = true;
           videoElement.play().catch(err => {
             console.log("Autoplay blocked. Waiting for manual user tap interaction.");
@@ -164,8 +173,18 @@
             spinnerBackup.style.display = 'none';
             canvas.style.display = 'block';
 
+            if (img.width === 0 || img.height === 0) {
+              console.error('Sprite image has invalid dimensions');
+              return;
+            }
+
             const frameWidth = img.width / totalFrames;
             const frameHeight = img.height;
+
+            if (frameWidth <= 0 || !isFinite(frameWidth)) {
+              console.error('Invalid frame width calculated');
+              return;
+            }
 
             if (customSize) {
               const aspectRatio = frameWidth / frameHeight;
@@ -177,7 +196,7 @@
             }
 
             let currentFrame = 0;
-            setInterval(() => {
+            animationInterval = setInterval(() => {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
               ctx.drawImage(
                 img, 
@@ -187,9 +206,14 @@
               currentFrame = (currentFrame + 1) % totalFrames;
             }, 1000 / frameRate);
           };
+
+          img.onerror = function() {
+            console.error('Failed to load sprite strip image:', stripUrl);
+            // Keep default spinner visible as fallback
+          };
         }
       })
-      .catch(error => console.error('Error:', error));
+      .catch(error => console.error('Error loading config:', error));
   </script>
 </body>
 </html>
