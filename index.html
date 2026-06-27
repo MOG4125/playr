@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>It's Playr bitch</title>
+  <title>Custom Configurable Video Player</title>
   <style>
     html, body {
       margin: 0;
@@ -42,6 +42,7 @@
       height: 100%;
       background-color: #000000;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       z-index: 10;
@@ -74,17 +75,36 @@
       opacity: 0 !important;
       pointer-events: none !important;
     }
+
+    .error-message {
+      color: #ff4444;
+      font-size: 14px;
+      margin-top: 20px;
+      text-align: center;
+      padding: 0 20px;
+      display: none;
+    }
+
+    .tap-to-play {
+      color: #ffffff;
+      font-size: 18px;
+      margin-top: 15px;
+      text-align: center;
+      display: none;
+    }
   </style>
 </head>
 <body>
 
   <div class="player-container">
     <!-- OPTIMIZED: Strict attributes to override iOS video player overrides -->
-    <video id="customVideo" controls playsinline webkit-playsinline></video>
+    <video id="customVideo" controls playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
 
     <div id="loadingOverlay" class="loading-overlay">
       <div id="spinnerBackup" class="default-spinner"></div>
       <canvas id="animationCanvas" style="display: none;"></canvas>
+      <div id="errorMessage" class="error-message"></div>
+      <div id="tapToPlay" class="tap-to-play">Tap to play</div>
     </div>
   </div>
 
@@ -94,8 +114,19 @@
     const spinnerBackup = document.getElementById('spinnerBackup');
     const canvas = document.getElementById('animationCanvas');
     const ctx = canvas.getContext('2d');
+    const errorMessage = document.getElementById('errorMessage');
+    const tapToPlay = document.getElementById('tapToPlay');
 
     let animationInterval = null;
+    let configLoaded = false;
+    let videoLoadFailed = false;
+
+    function showError(msg) {
+      errorMessage.textContent = msg;
+      errorMessage.style.display = 'block';
+      spinnerBackup.style.display = 'none';
+      canvas.style.display = 'none';
+    }
 
     function hideOverlay() {
       loadingOverlay.classList.add('hidden');
@@ -105,23 +136,82 @@
       }
     }
 
-    // Force hide overlay when video state updates
-    videoElement.addEventListener('playing', hideOverlay);
-    videoElement.addEventListener('canplay', hideOverlay);
-    videoElement.addEventListener('loadeddata', hideOverlay);
+    function showOverlay() {
+      loadingOverlay.classList.remove('hidden');
+    }
+
+    // Video event listeners
+    videoElement.addEventListener('playing', () => {
+      hideOverlay();
+      videoLoadFailed = false;
+    });
+
+    videoElement.addEventListener('canplay', () => {
+      hideOverlay();
+    });
+
+    videoElement.addEventListener('loadeddata', () => {
+      hideOverlay();
+    });
+
+    videoElement.addEventListener('error', (e) => {
+      videoLoadFailed = true;
+      const error = videoElement.error;
+      let msg = 'Video failed to load';
+      if (error) {
+        switch(error.code) {
+          case 1: msg = 'Video loading aborted'; break;
+          case 2: msg = 'Network error - check video URL'; break;
+          case 3: msg = 'Video decode error - file may be corrupted'; break;
+          case 4: msg = 'Video format not supported'; break;
+        }
+      }
+      console.error('Video error:', msg, error);
+      showError(msg + ' — Tap overlay to retry');
+      tapToPlay.style.display = 'block';
+      showOverlay();
+    });
+
+    videoElement.addEventListener('stalled', () => {
+      console.warn('Video stalled');
+      showOverlay();
+    });
+
+    videoElement.addEventListener('waiting', () => {
+      console.warn('Video waiting for data');
+      showOverlay();
+    });
 
     // Manual click container to handle iPad autoplay block overrides
     loadingOverlay.addEventListener('click', () => {
-      if (!videoElement.src) return; // Don't try to play if no source loaded
+      if (!videoElement.src) {
+        showError('No video source configured');
+        return;
+      }
+
+      if (videoLoadFailed) {
+        // Retry loading
+        videoElement.load();
+        videoLoadFailed = false;
+      }
+
       videoElement.muted = true;
-      videoElement.play().catch(err => console.log("Bypass fail:", err));
-      hideOverlay();
+      const playPromise = videoElement.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          hideOverlay();
+        }).catch(err => {
+          console.log("Autoplay blocked or playback failed:", err);
+          tapToPlay.style.display = 'block';
+          showError('Tap to play (autoplay blocked)');
+        });
+      }
     });
 
     function parseConfigFile(text) {
       const config = {};
       const lines = text.split('\n');
-      
+
       lines.forEach(line => {
         if (line.includes('=')) {
           const index = line.indexOf('=');
@@ -135,10 +225,31 @@
       return config;
     }
 
+    function convertDropboxUrl(url) {
+      // Convert Dropbox shared links to direct download links
+      if (!url) return url;
+
+      // Replace dl=0 with dl=1 for direct download
+      if (url.includes('dropbox.com')) {
+        url = url.replace(/[?&]dl=0/, '?dl=1');
+        if (!url.includes('dl=')) {
+          url += (url.includes('?') ? '&' : '?') + 'dl=1';
+        }
+      }
+      return url;
+    }
+
     fetch('config.playr?cb=' + Date.now())
-      .then(response => response.text())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Failed to load config: ' + response.status);
+        }
+        return response.text();
+      })
       .then(text => {
+        configLoaded = true;
         const settings = parseConfigFile(text);
+        console.log('Config loaded:', settings);
 
         if (settings.background_color) {
           const color = settings.background_color;
@@ -148,18 +259,32 @@
         }
 
         if (settings.video_url) {
+          const videoUrl = convertDropboxUrl(settings.video_url);
+          console.log('Loading video from:', videoUrl);
+
+          // Reset video element completely
+          videoElement.pause();
           videoElement.removeAttribute('src');
           videoElement.load();
-          
-          videoElement.src = settings.video_url;
+
+          // Set new source
+          videoElement.src = videoUrl;
           videoElement.load();
-          
+
+          // Try autoplay muted
           videoElement.muted = true;
-          videoElement.play().catch(err => {
-            console.log("Autoplay blocked. Waiting for manual user tap interaction.");
-          });
+          const playPromise = videoElement.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(err => {
+              console.log("Autoplay blocked. Waiting for manual user interaction.", err);
+              tapToPlay.style.display = 'block';
+            });
+          }
+        } else {
+          showError('No video_url in config');
         }
 
+        // Load sprite animation
         const stripUrl = settings.strip_image;
         const totalFrames = parseInt(settings.animation_frames) || 1;
         const frameRate = parseInt(settings.animation_fps) || 24;
@@ -167,6 +292,7 @@
 
         if (stripUrl && totalFrames > 1) {
           const img = new Image();
+          img.crossOrigin = 'anonymous';
           img.src = stripUrl + '?cb=' + Date.now();
 
           img.onload = function() {
@@ -175,6 +301,7 @@
 
             if (img.width === 0 || img.height === 0) {
               console.error('Sprite image has invalid dimensions');
+              spinnerBackup.style.display = 'block';
               return;
             }
 
@@ -183,6 +310,7 @@
 
             if (frameWidth <= 0 || !isFinite(frameWidth)) {
               console.error('Invalid frame width calculated');
+              spinnerBackup.style.display = 'block';
               return;
             }
 
@@ -213,7 +341,10 @@
           };
         }
       })
-      .catch(error => console.error('Error loading config:', error));
+      .catch(error => {
+        console.error('Config error:', error);
+        showError('Failed to load config: ' + error.message);
+      });
   </script>
 </body>
 </html>
