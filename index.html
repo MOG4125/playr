@@ -45,7 +45,6 @@
       justify-content: center;
       align-items: center;
       z-index: 10;
-      /* FIXED: Allows you to click straight through the overlay to start the video if it pauses */
       pointer-events: auto; 
       transition: opacity 0.4s ease, background-color 0.3s ease;
       cursor: pointer;
@@ -80,8 +79,8 @@
 <body>
 
   <div class="player-container">
-    <!-- FIXED: Added 'muted' explicitly to satisfy strict browser autoplay permissions -->
-    <video id="customVideo" controls autoplay muted playsinline></video>
+    <!-- OPTIMIZED: Strict attributes to override iOS video player overrides -->
+    <video id="customVideo" controls playsinline webkit-playsinline></video>
 
     <div id="loadingOverlay" class="loading-overlay">
       <div id="spinnerBackup" class="default-spinner"></div>
@@ -96,16 +95,15 @@
     const canvas = document.getElementById('animationCanvas');
     const ctx = canvas.getContext('2d');
 
-    // FIXED: Stronger visibility listeners to dismiss the screen as soon as video media exists
-    videoElement.addEventListener('waiting', () => loadingOverlay.classList.remove('hidden'));
+    // Force hide overlay when video state updates
     videoElement.addEventListener('playing', () => loadingOverlay.classList.add('hidden'));
     videoElement.addEventListener('canplay', () => loadingOverlay.classList.add('hidden'));
-    videoElement.addEventListener('canplaythrough', () => loadingOverlay.classList.add('hidden'));
     videoElement.addEventListener('loadeddata', () => loadingOverlay.classList.add('hidden'));
 
-    // FIXED: Clicking directly on the loading animation forces the video to bypass browser blocks and play
+    // Manual click container to handle iPad autoplay block overrides
     loadingOverlay.addEventListener('click', () => {
-      videoElement.play().catch(err => console.log("Autoplay context bypass triggered"));
+      videoElement.muted = true; // Guarantees muting rules are satisfied before playing
+      videoElement.play().catch(err => console.log("Bypass fail:", err));
       loadingOverlay.classList.add('hidden');
     });
 
@@ -127,12 +125,7 @@
     }
 
     fetch('config.playr?cb=' + Date.now())
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Could not find config.playr file');
-        }
-        return response.text();
-      })
+      .then(response => response.text())
       .then(text => {
         const settings = parseConfigFile(text);
 
@@ -144,8 +137,18 @@
         }
 
         if (settings.video_url) {
+          // OPTIMIZED: Clears active video instances before feeding the new address
+          videoElement.removeAttribute('src');
+          videoElement.load();
+          
           videoElement.src = settings.video_url;
-          videoElement.load(); // Forces the browser to stream the config video target immediately
+          videoElement.load();
+          
+          // Triggers muted autoplay cycle safely
+          videoElement.muted = true;
+          videoElement.play().catch(err => {
+            console.log("Autoplay blocked. Waiting for manual user tap interaction.");
+          });
         }
 
         const stripUrl = settings.strip_image;
@@ -186,7 +189,7 @@
           };
         }
       })
-      .catch(error => console.error('Error loading config file:', error));
+      .catch(error => console.error('Error:', error));
   </script>
 </body>
 </html>
