@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>It's Playr Bitch</title>
+  <title>Custom Configurable Video Player</title>
   <style>
     html, body {
       margin: 0;
@@ -83,6 +83,7 @@
       text-align: center;
       padding: 0 20px;
       display: none;
+      max-width: 80%;
     }
 
     .tap-to-play {
@@ -92,12 +93,21 @@
       text-align: center;
       display: none;
     }
+
+    .debug-info {
+      color: #888;
+      font-size: 11px;
+      margin-top: 10px;
+      text-align: center;
+      display: none;
+      max-width: 90%;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
 
   <div class="player-container">
-    <!-- OPTIMIZED: Strict attributes to override iOS video player overrides -->
     <video id="customVideo" controls playsinline webkit-playsinline preload="auto" crossorigin="anonymous"></video>
 
     <div id="loadingOverlay" class="loading-overlay">
@@ -105,6 +115,7 @@
       <canvas id="animationCanvas" style="display: none;"></canvas>
       <div id="errorMessage" class="error-message"></div>
       <div id="tapToPlay" class="tap-to-play">Tap to play</div>
+      <div id="debugInfo" class="debug-info"></div>
     </div>
   </div>
 
@@ -116,16 +127,22 @@
     const ctx = canvas.getContext('2d');
     const errorMessage = document.getElementById('errorMessage');
     const tapToPlay = document.getElementById('tapToPlay');
+    const debugInfo = document.getElementById('debugInfo');
 
     let animationInterval = null;
     let configLoaded = false;
     let videoLoadFailed = false;
+    let currentVideoUrl = '';
 
-    function showError(msg) {
+    function showError(msg, debug) {
       errorMessage.textContent = msg;
       errorMessage.style.display = 'block';
       spinnerBackup.style.display = 'none';
       canvas.style.display = 'none';
+      if (debug) {
+        debugInfo.textContent = debug;
+        debugInfo.style.display = 'block';
+      }
     }
 
     function hideOverlay() {
@@ -158,16 +175,17 @@
       videoLoadFailed = true;
       const error = videoElement.error;
       let msg = 'Video failed to load';
+      let debug = 'URL: ' + currentVideoUrl;
       if (error) {
         switch(error.code) {
           case 1: msg = 'Video loading aborted'; break;
-          case 2: msg = 'Network error - check video URL'; break;
-          case 3: msg = 'Video decode error - file may be corrupted'; break;
-          case 4: msg = 'Video format not supported'; break;
+          case 2: msg = 'Network error - video URL is unreachable or blocked by CORS'; debug += ' | Code: MEDIA_ERR_NETWORK'; break;
+          case 3: msg = 'Video decode error - file may be corrupted or wrong format'; debug += ' | Code: MEDIA_ERR_DECODE'; break;
+          case 4: msg = 'Video format not supported by this browser'; debug += ' | Code: MEDIA_ERR_SRC_NOT_SUPPORTED'; break;
         }
       }
       console.error('Video error:', msg, error);
-      showError(msg + ' — Tap overlay to retry');
+      showError(msg + ' — Tap overlay to retry', debug);
       tapToPlay.style.display = 'block';
       showOverlay();
     });
@@ -182,7 +200,7 @@
       showOverlay();
     });
 
-    // Manual click container to handle iPad autoplay block overrides
+    // Manual click container to handle autoplay blocks
     loadingOverlay.addEventListener('click', () => {
       if (!videoElement.src) {
         showError('No video source configured');
@@ -190,7 +208,6 @@
       }
 
       if (videoLoadFailed) {
-        // Retry loading
         videoElement.load();
         videoLoadFailed = false;
       }
@@ -201,9 +218,9 @@
         playPromise.then(() => {
           hideOverlay();
         }).catch(err => {
-          console.log("Autoplay blocked or playback failed:", err);
+          console.log("Autoplay blocked:", err);
           tapToPlay.style.display = 'block';
-          showError('Tap to play (autoplay blocked)');
+          showError('Tap to play (autoplay blocked by browser)');
         });
       }
     });
@@ -226,15 +243,17 @@
     }
 
     function convertDropboxUrl(url) {
-      // Convert Dropbox shared links to direct download links
       if (!url) return url;
 
-      // Replace dl=0 with dl=1 for direct download
+      // Dropbox changed: dl=1 no longer works for video streaming
+      // Use raw=1 instead for embeddable content, or convert to direct download format
       if (url.includes('dropbox.com')) {
-        url = url.replace(/[?&]dl=0/, '?dl=1');
-        if (!url.includes('dl=')) {
-          url += (url.includes('?') ? '&' : '?') + 'dl=1';
-        }
+        // Remove any existing dl parameter
+        url = url.replace(/[?&]dl=[01]/, '');
+        // Remove trailing ? or &
+        url = url.replace(/[?&]$/, '');
+        // Add raw=1 for embeddable streaming
+        url += (url.includes('?') ? '&' : '?') + 'raw=1';
       }
       return url;
     }
@@ -259,8 +278,8 @@
         }
 
         if (settings.video_url) {
-          const videoUrl = convertDropboxUrl(settings.video_url);
-          console.log('Loading video from:', videoUrl);
+          currentVideoUrl = convertDropboxUrl(settings.video_url);
+          console.log('Loading video from:', currentVideoUrl);
 
           // Reset video element completely
           videoElement.pause();
@@ -268,7 +287,7 @@
           videoElement.load();
 
           // Set new source
-          videoElement.src = videoUrl;
+          videoElement.src = currentVideoUrl;
           videoElement.load();
 
           // Try autoplay muted
@@ -281,7 +300,7 @@
             });
           }
         } else {
-          showError('No video_url in config');
+          showError('No video_url found in config.playr');
         }
 
         // Load sprite animation
@@ -337,13 +356,12 @@
 
           img.onerror = function() {
             console.error('Failed to load sprite strip image:', stripUrl);
-            // Keep default spinner visible as fallback
           };
         }
       })
       .catch(error => {
         console.error('Config error:', error);
-        showError('Failed to load config: ' + error.message);
+        showError('Failed to load config.playr: ' + error.message);
       });
   </script>
 </body>
