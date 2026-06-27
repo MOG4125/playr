@@ -1,5 +1,6 @@
+video_url = https://youtu.be/KC45x0YpCQQ?si=oA3thFqHXLoaazGZ
 strip_image = loa.png
 animation_frames = 91
-animation_fps = 30
+animation_fps = 24
 animation_size = 250
-background_color = #0000FF
+background_color = #444444
